@@ -1,0 +1,26 @@
+# ==========================================
+# Python / Backend Ignores
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+.env
+
+# ==========================================
+# Node.js / Frontend Ignores
+# ==========================================
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/build/
+
+# ==========================================
+# OS & IDE Specific
+# ==========================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
