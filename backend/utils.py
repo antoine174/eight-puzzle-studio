@@ -31,30 +31,43 @@ def get_neighbors(state: Tuple[int, ...]) -> List[Tuple[str, Tuple[int, ...]]]:
 
     for action, dr, dc in moves:
         new_r, new_c = row + dr, col + dc
-        if 0 <= new_r < 3 and 0 <= new_c < 3:
-            swap_idx = new_r * 3 + new_c
+        if 0 <= new_r<3 and 0 <= new_c<3:
+            swap_idx = new_r * 3+new_c
             new_state = list(state)
             new_state[zero_idx], new_state[swap_idx] = new_state[swap_idx], new_state[zero_idx]
             neighbors.append((action, tuple(new_state)))
 
     return neighbors
 
-class TelemetryTracker:
+MAX_EXPANSION_STEPS = 2000   
 
-    def __init__(self, initial_state: Tuple[int, ...]):
+class TelemetryTracker:
+    def __init__(self, initial_state: Tuple[int, ...], track_expansions: bool = True):
         self.initial_state = initial_state
         self.start_time = time.perf_counter()
         self.nodes_expanded = 0
         self.max_search_depth = 0
+        self.expanded_steps: List[StepSnapshot] = []
         self.parent_map: Dict[Tuple[int, ...], Tuple[Optional[Tuple[int, ...]], str, int]] = {
             initial_state: (None, "Initial", 0)
         }
+        self.track_expansions = track_expansions  
 
-    def record_expansion(self, current_state: Tuple[int, ...], current_depth: int):
-        """ we call this to rincrement the nodes discovered"""
+    def record_expansion(self, current_state: Tuple[int, ...], current_depth: int, prefix: str = ""):
         self.nodes_expanded += 1
         if current_depth > self.max_search_depth:
             self.max_search_depth = current_depth
+         #track node EXPasnion for only those marked true 
+        if self.track_expansions and len(self.expanded_steps) < MAX_EXPANSION_STEPS:
+            _, action, _ = self.parent_map.get(current_state, (None, "Initial", 0))
+            label = f"{prefix} • {action} (d={current_depth})" if prefix else f"{action} (d={current_depth})"
+            self.expanded_steps.append(
+                StepSnapshot(
+                    step_number=len(self.expanded_steps),
+                    action=label,
+                    board=list(current_state)
+                )
+            )
 
     def record_child(
         self,
@@ -63,12 +76,13 @@ class TelemetryTracker:
         action: str,
         child_depth: int
     ):
+       
         self.parent_map[child_state] = (parent_state, action, child_depth)
         if child_depth > self.max_search_depth:
             self.max_search_depth = child_depth
 
     def build_solution(self, algorithm_name: str, goal_found: bool, final_depth: int = 0) -> dict:
-        """when finding the solution call it to return everything"""
+        """Call this when we reach the goal to store the parg"""
         elapsed_ms = round((time.perf_counter() - self.start_time) * 1000, 3)
         solvable, inv = is_solvable(list(self.initial_state))
 
@@ -84,9 +98,21 @@ class TelemetryTracker:
                 "max_search_depth": self.max_search_depth,
                 "running_time_ms": elapsed_ms,
                 "traceable_steps": [],
+                "expanded_steps": self.expanded_steps,
             }
 
-        # Backtrack
+        # append final goal to expanded nodes
+        if len(self.expanded_steps) < MAX_EXPANSION_STEPS:
+            _, goal_action, _ = self.parent_map.get(GOAL_STATE, (None, "Goal", final_depth))
+            self.expanded_steps.append(
+                StepSnapshot(
+                    step_number=len(self.expanded_steps),
+                    action=f"GOAL! • {goal_action} (d={final_depth})",
+                    board=list(GOAL_STATE)
+                )
+            )
+
+        # Backtrack 
         path_actions = []
         board_sequence = []
         curr = GOAL_STATE
@@ -117,4 +143,5 @@ class TelemetryTracker:
             "max_search_depth": self.max_search_depth,
             "running_time_ms": elapsed_ms,
             "traceable_steps": traceable_steps,
+            "expanded_steps": self.expanded_steps,
         }

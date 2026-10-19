@@ -1,29 +1,43 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import confetti from "canvas-confetti";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { motion } from "framer-motion";
 import {
-  Play, Pause, RotateCcw, StepForward, StepBack, Volume2, VolumeX,
-  Sparkles, Cpu, Activity, Layers, Clock, Compass, Zap, Eye
+  Play,
+  Pause,
+  RotateCcw,
+  SkipBack,
+  SkipForward,
+  Compass,
+  Cpu,
+  Layers,
+  Clock,
+  Trophy,
+  AlertTriangle,
+  Sparkles,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
-import { sound } from "./utils/soundEngine";
+import "./App.css";
+
+const API_BASE = "http://127.0.0.1:8000";
 
 const PRESETS = [
-  { name: "Assignment PDF Sample", board: [1, 2, 5, 3, 4, 0, 6, 7, 8] },
-  { name: "Medium Depth (14 Moves)", board: [3, 1, 2, 6, 4, 5, 7, 8, 0] },
-  { name: "Hard Depth (22 Moves)", board: [7, 2, 4, 5, 0, 6, 8, 3, 1] },
-  { name: "Unsolvable Test (Odd Inversions)", board: [8, 1, 2, 0, 4, 3, 7, 6, 5] },
+  { label: "Assignment PDF Sample", state: "1,2,5,3,4,0,6,7,8" },
+  { label: "Medium Depth (14 Moves)", state: "3,1,2,6,4,5,7,8,0" },
+  { label: "Hard Depth (22 Moves)", state: "7,2,4,5,0,6,8,3,1" },
+  { label: "Unsolvable Test (Odd Inversions)", state: "8,1,2,0,4,3,7,6,5" },
 ];
 
-const ALGORITHMS = [
-  { id: "bfs", name: "BFS", badge: "Uninformed • Optimal", color: "from-cyan-500 to-blue-600" },
-  { id: "dfs", name: "DFS", badge: "Uninformed • LIFO", color: "from-purple-500 to-indigo-600" },
-  { id: "iddfs", name: "Iterative DFS", badge: "Depth-Limited", color: "from-amber-500 to-orange-600" },
-  { id: "astar_manhattan", name: "A* Manhattan", badge: "Informed • L1 Heuristic", color: "from-emerald-400 to-teal-600" },
-  { id: "astar_euclidean", name: "A* Euclidean", badge: "Informed • L2 Heuristic", color: "from-rose-500 to-pink-600" },
+const STRATEGIES = [
+  { id: "bfs", name: "BFS", desc: "Uninformed • Optimal", color: "#3b82f6" },
+  { id: "dfs", name: "DFS", desc: "Uninformed • LIFO", color: "#a855f7" },
+  { id: "iddfs", name: "Iterative DFS", desc: "Depth-Limited", color: "#f97316" },
+  { id: "astar_manhattan", name: "A* Manhattan", desc: "Informed • L1 Heuristic", color: "#10b981" },
+  { id: "astar_euclidean", name: "A* Euclidean", desc: "Informed • L2 Heuristic", color: "#ec4899" },
 ];
 
-function computeInversions(board) {
-  const tiles = board.filter((x) => x !== 0);
+// Calculate inversions on the client side for live badge feedback
+function calculateInversions(arr) {
+  const tiles = arr.filter((x) => x !== 0);
   let inv = 0;
   for (let i = 0; i < tiles.length; i++) {
     for (let j = i + 1; j < tiles.length; j++) {
@@ -33,543 +47,1177 @@ function computeInversions(board) {
   return inv;
 }
 
-function tileManhattanDist(tileVal, currentIndex) {
-  if (tileVal === 0) return 0;
-  const curR = Math.floor(currentIndex / 3), curC = currentIndex % 3;
-  const goalR = Math.floor(tileVal / 3), goalC = tileVal % 3;
-  return Math.abs(curR - goalR) + Math.abs(curC - goalC);
+// Calculate individual tile Manhattan distance to its goal position (0..8)
+function getTileDistance(tileValue, currentIndex) {
+  if (tileValue === 0) return 0;
+  const curRow = Math.floor(currentIndex / 3);
+  const curCol = currentIndex % 3;
+  const goalRow = Math.floor(tileValue / 3);
+  const goalCol = tileValue % 3;
+  return Math.abs(curRow - goalRow) + Math.abs(curCol - goalCol);
+}
+
+// Total board Manhattan distance h(n)
+function getBoardManhattan(board) {
+  if (!board || board.length !== 9) return 0;
+  return board.reduce((sum, val, idx) => sum + getTileDistance(val, idx), 0);
+}
+
+// Lightweight Web Audio synthesizer for subtle UI clicks
+function playTickSound(enabled, freq = 320) {
+  if (!enabled) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!window._puzzleAudioCtx) window._puzzleAudioCtx = new Ctx();
+    const ctx = window._puzzleAudioCtx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    gain.gain.setValueAtTime(0.03, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.045);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.05);
+  } catch {
+    // Ignore audio context restrictions
+  }
 }
 
 export default function App() {
-  const [initialBoard, setInitialBoard] = useState([1, 2, 5, 3, 4, 0, 6, 7, 8]);
-  const [customInput, setCustomInput] = useState("1,2,5,3,4,0,6,7,8");
-  const [selectedAlgo, setSelectedAlgo] = useState("astar_manhattan");
-  const [heatmapMode, setHeatmapMode] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [inputStr, setInputStr] = useState("1,2,5,3,4,0,6,7,8");
+  const [algorithm, setAlgorithm] = useState("iddfs");
+  const [maxDepth, setMaxDepth] = useState(35);
 
-  // Playback & Telemetry state
-  const [telemetry, setTelemetry] = useState(null);
-  const [benchmarkData, setBenchmarkData] = useState([]);
+  const [result, setResult] = useState(null);
+  const [arenaResults, setArenaResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  // Playback state: "goal" (traceable_steps) or "expansion" (expanded_steps)
+  const [playbackMode, setPlaybackMode] = useState("goal");
   const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speedMs, setSpeedMs] = useState(380);
-  const [loading, setLoading] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const [soundEnabled, setSoundEnabled] = useState(true);
 
-  const inversions = useMemo(() => computeInversions(initialBoard), [initialBoard]);
-  const isSolvable = inversions % 2 === 0;
+  const timerRef = useRef(null);
 
-  const activeBoard = useMemo(() => {
-    if (telemetry?.traceable_steps?.length > 0 && telemetry.traceable_steps[currentStep]) {
-      return telemetry.traceable_steps[currentStep].board;
+  // Parse input string into 9 integers
+  const parsedBoard = useMemo(() => {
+    const nums = inputStr
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "")
+      .map(Number);
+    if (
+      nums.length === 9 &&
+      nums.every((n) => !Number.isNaN(n) && n >= 0 && n <= 8) &&
+      new Set(nums).size === 9
+    ) {
+      return nums;
     }
-    return initialBoard;
-  }, [telemetry, currentStep, initialBoard]);
+    return null;
+  }, [inputStr]);
 
-  // Calculate total board heuristic live
-  const liveBoardManhattan = useMemo(() => {
-    return activeBoard.reduce((acc, val, idx) => acc + tileManhattanDist(val, idx), 0);
-  }, [activeBoard]);
+  const inversions = useMemo(
+    () => (parsedBoard ? calculateInversions(parsedBoard) : 0),
+    [parsedBoard]
+  );
+  const isSolvable = parsedBoard ? inversions % 2 === 0 : false;
 
-  // DVR Auto-playback loop
+  // Choose active steps array based on playbackMode ("goal" vs "expansion")
+  const activeSteps = useMemo(() => {
+    if (!result) return [];
+    if (playbackMode === "expansion" && result.expanded_steps?.length > 0) {
+      return result.expanded_steps;
+    }
+    return result.traceable_steps || [];
+  }, [result, playbackMode]);
+
+  // Current board displayed on the 3x3 grid
+  const currentBoard = useMemo(() => {
+    if (activeSteps.length > 0) {
+      const safeIdx = Math.min(currentStep, activeSteps.length - 1);
+      return activeSteps[safeIdx].board;
+    }
+    return parsedBoard || [1, 2, 5, 3, 4, 0, 6, 7, 8];
+  }, [activeSteps, currentStep, parsedBoard]);
+
+  const currentActionLabel = useMemo(() => {
+    if (activeSteps.length > 0) {
+      const safeIdx = Math.min(currentStep, activeSteps.length - 1);
+      return activeSteps[safeIdx].action;
+    }
+    return "Initial";
+  }, [activeSteps, currentStep]);
+
+  const liveHeuristic = useMemo(() => getBoardManhattan(currentBoard), [currentBoard]);
+
+  // DVR Playback loop
   useEffect(() => {
-    if (!isPlaying || !telemetry?.traceable_steps) return;
-    if (currentStep >= telemetry.traceable_steps.length - 1) {
-      setIsPlaying(false);
-      sound.playVictoryChord();
-      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+    if (!isPlaying || activeSteps.length === 0) {
+      clearInterval(timerRef.current);
       return;
     }
-    const timer = setTimeout(() => {
-      const next = currentStep + 1;
-      setCurrentStep(next);
-      sound.playTileMove(next, telemetry.traceable_steps.length - 1);
-    }, speedMs);
-    return () => clearTimeout(timer);
-  }, [isPlaying, currentStep, telemetry, speedMs]);
 
-  const handleSolve = async () => {
-    if (!isSolvable) {
-      sound.playError();
+    const intervalMs = Math.max(16, Math.round(420 / speed));
+    timerRef.current = setInterval(() => {
+      setCurrentStep((prev) => {
+        if (prev >= activeSteps.length - 1) {
+          setIsPlaying(false);
+          playTickSound(soundEnabled, 580);
+          return prev;
+        }
+        playTickSound(soundEnabled, playbackMode === "expansion" ? 280 : 360);
+        return prev + 1;
+      });
+    }, intervalMs);
+
+    return () => clearInterval(timerRef.current);
+  }, [isPlaying, speed, activeSteps, soundEnabled, playbackMode]);
+
+  // Run single search algorithm
+  const handleRunSearch = async () => {
+    if (!parsedBoard) {
+      setErrorMsg("Please enter a valid 9-number board containing digits 0 through 8.");
       return;
     }
+    setErrorMsg("");
     setLoading(true);
     setIsPlaying(false);
+    setArenaResults(null);
+
     try {
-      const res = await fetch("http://localhost:8000/api/solve", {
+      const response = await fetch(`${API_BASE}/api/solve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initial_state: initialBoard, algorithm: selectedAlgo, max_depth: 35 }),
+        body: JSON.stringify({
+          initial_state: parsedBoard,
+          algorithm,
+          max_depth: Number(maxDepth) || 35,
+        }),
       });
-      const data = await res.json();
-      setTelemetry(data);
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to solve puzzle.");
+      }
+
+      setResult(data);
       setCurrentStep(0);
-      if (data.traceable_steps?.length > 1) setIsPlaying(true);
     } catch (err) {
-      console.error("Backend connection error:", err);
+      setErrorMsg(err.message || "Error connecting to FastAPI backend.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleBenchmarkAll = async () => {
-    if (!isSolvable) {
-      sound.playError();
+  // Run Arena Benchmark across all algorithms
+  const handleRunArena = async () => {
+    if (!parsedBoard) {
+      setErrorMsg("Please enter a valid 9-number board containing digits 0 through 8.");
       return;
     }
+    setErrorMsg("");
     setLoading(true);
+    setIsPlaying(false);
+
     try {
-      const res = await fetch("http://localhost:8000/api/benchmark", {
+      const response = await fetch(`${API_BASE}/api/benchmark`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initial_state: initialBoard, algorithm: selectedAlgo, max_depth: 35 }),
+        body: JSON.stringify({
+          initial_state: parsedBoard,
+          algorithm: "all",
+          max_depth: Number(maxDepth) || 35,
+        }),
       });
-      const data = await res.json();
-      setBenchmarkData(data.results || []);
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Arena benchmark failed.");
+      }
+
+      setArenaResults(data.benchmarks || data);
     } catch (err) {
-      console.error("Benchmark error:", err);
+      setErrorMsg(err.message || "Error running Arena Race.");
     } finally {
       setLoading(false);
     }
   };
 
-  const applyCustomBoard = (str) => {
-    setCustomInput(str);
-    const nums = str.split(",").map((s) => parseInt(s.trim(), 10));
-    if (nums.length === 9 && [...nums].sort().join(",") === "0,1,2,3,4,5,6,7,8") {
-      setInitialBoard(nums);
-      setTelemetry(null);
-      setCurrentStep(0);
+  // Sliding window for sequence list so 60,000+ DFS steps never lag the DOM
+  const sequenceWindow = useMemo(() => {
+    if (!activeSteps || activeSteps.length <= 1) return [];
+    const total = activeSteps.length - 1; // Exclude step 0 in move badges if desired, or include all
+    const windowRadius = 30;
+
+    if (playbackMode === "expansion") {
+      // In expansion mode, step 0 is also an expansion frame (Initial d=0)
+      const start = Math.max(0, currentStep - windowRadius);
+      const end = Math.min(activeSteps.length - 1, currentStep + windowRadius);
+      const items = [];
+      for (let i = start; i <= end; i++) {
+        items.push(activeSteps[i]);
+      }
+      return { items, total: activeSteps.length };
+    } else {
+      // In goal mode, steps 1..N are the moves
+      const start = Math.max(1, currentStep - windowRadius);
+      const end = Math.min(total, currentStep + windowRadius);
+      const items = [];
+      for (let i = start; i <= end; i++) {
+        items.push(activeSteps[i]);
+      }
+      return { items, total };
     }
-  };
+  }, [activeSteps, currentStep, playbackMode]);
 
   return (
-    <div className="min-h-screen bg-[#07090E] text-slate-100 font-sans selection:bg-emerald-500/30 p-6">
-      {/* Top Studio Header */}
-      <header className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-white/10">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.25em] text-emerald-400 font-mono">
-            <Sparkles className="w-3.5 h-3.5" /> Alexandria University • Computer & Systems AI Studio
-          </div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1 bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-            8-Puzzle Kinetic State-Space Observatory
+    <div
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#090d16",
+        color: "#f8fafc",
+        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
+        padding: "24px",
+        boxSizing: "border-box",
+      }}
+    >
+      {/* Top Header */}
+      <header
+        style={{
+          maxWidth: "1380px",
+          margin: "0 auto 20px auto",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          borderBottom: "1px solid #1e293b",
+          paddingBottom: "14px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <Sparkles size={22} color="#10b981" />
+          <h1 style={{ fontSize: "20px", fontWeight: 700, margin: 0, letterSpacing: "-0.02em" }}>
+            8-Puzzle AI Search Studio
           </h1>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              sound.enabled = !soundEnabled;
-              setSoundEnabled(!soundEnabled);
+          <span
+            style={{
+              fontSize: "11px",
+              padding: "3px 8px",
+              borderRadius: "999px",
+              backgroundColor: "rgba(16, 185, 129, 0.12)",
+              color: "#10b981",
+              border: "1px solid rgba(16, 185, 129, 0.3)",
+              fontFamily: "monospace",
             }}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-mono transition"
           >
-            {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-400" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
-            {soundEnabled ? "SYNTH AUDIO ON" : "MUTED"}
-          </button>
-
-          <button
-            onClick={() => setHeatmapMode(!heatmapMode)}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-mono transition ${
-              heatmapMode
-                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
-                : "bg-white/5 border-white/10 text-slate-400"
-            }`}
-          >
-            <Eye className="w-4 h-4" />
-            HEURISTIC X-RAY: {heatmapMode ? "ON" : "OFF"}
-          </button>
+            Alexandria University • AI Lab
+          </span>
         </div>
+
+        <button
+          onClick={() => setSoundEnabled(!soundEnabled)}
+          style={{
+            background: "#111827",
+            border: "1px solid #1e293b",
+            color: soundEnabled ? "#10b981" : "#64748b",
+            borderRadius: "8px",
+            padding: "7px 12px",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            fontSize: "12px",
+          }}
+        >
+          {soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
+          {soundEnabled ? "Audio On" : "Muted"}
+        </button>
       </header>
 
-      <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6">
-        {/* Left Column: Controls, Presets & Solvability Gatekeeper */}
-        <section className="lg:col-span-4 space-y-5">
-          {/* Board Input & Solvability Card */}
-          <div className="p-5 rounded-2xl bg-[#0D111A] border border-white/10 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono uppercase tracking-wider text-slate-400">1. Initial Configuration</span>
+      {/* Error Banner */}
+      {errorMsg && (
+        <div
+          style={{
+            maxWidth: "1380px",
+            margin: "0 auto 16px auto",
+            padding: "12px 16px",
+            borderRadius: "10px",
+            backgroundColor: "rgba(239, 68, 68, 0.12)",
+            border: "1px solid rgba(239, 68, 68, 0.4)",
+            color: "#fca5a5",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            fontSize: "13px",
+          }}
+        >
+          <AlertTriangle size={16} color="#ef4444" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {/* Main 3-Column Dashboard */}
+      <div
+        style={{
+          maxWidth: "1380px",
+          margin: "0 auto",
+          display: "grid",
+          gridTemplateColumns: "340px 1fr 370px",
+          gap: "20px",
+          alignItems: "start",
+        }}
+      >
+        {/* LEFT COLUMN: Configuration & Strategy */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+          {/* 1. Initial Configuration Card */}
+          <div
+            style={{
+              backgroundColor: "#0f1523",
+              border: "1px solid #1e293b",
+              borderRadius: "14px",
+              padding: "18px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "14px",
+              }}
+            >
               <span
-                className={`text-xs font-mono px-2.5 py-0.5 rounded-full border ${
-                  isSolvable
-                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                    : "bg-rose-500/10 border-rose-500/30 text-rose-400"
-                }`}
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  letterSpacing: "0.08em",
+                  color: "#94a3b8",
+                  fontFamily: "monospace",
+                }}
               >
-                Inversions: {inversions} ({isSolvable ? "SOLVABLE" : "IMPOSSIBLE"})
+                1. INITIAL CONFIGURATION
+              </span>
+
+              <span
+                style={{
+                  fontSize: "11px",
+                  fontFamily: "monospace",
+                  padding: "4px 10px",
+                  borderRadius: "999px",
+                  backgroundColor: isSolvable
+                    ? "rgba(16, 185, 129, 0.12)"
+                    : "rgba(239, 68, 68, 0.15)",
+                  color: isSolvable ? "#10b981" : "#f87171",
+                  border: `1px solid ${
+                    isSolvable ? "rgba(16, 185, 129, 0.35)" : "rgba(239, 68, 68, 0.4)"
+                  }`,
+                }}
+              >
+                Inversions: {inversions} ({isSolvable ? "SOLVABLE" : "UNSOLVABLE"})
               </span>
             </div>
 
             <input
               type="text"
-              value={customInput}
-              onChange={(e) => applyCustomBoard(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-black/50 border border-white/15 font-mono text-sm text-emerald-300 focus:outline-none focus:border-emerald-500"
+              value={inputStr}
+              onChange={(e) => setInputStr(e.target.value)}
               placeholder="e.g. 1,2,5,3,4,0,6,7,8"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "12px 14px",
+                backgroundColor: "#090d16",
+                border: "1px solid #10b981",
+                borderRadius: "10px",
+                color: "#34d399",
+                fontFamily: "monospace",
+                fontSize: "15px",
+                fontWeight: 600,
+                marginBottom: "14px",
+                outline: "none",
+              }}
             />
 
-            <div className="grid grid-cols-2 gap-2">
-              {PRESETS.map((p) => (
+           <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+              }}
+            >
+              {PRESETS.map((preset) => (
                 <button
-                  key={p.name}
-                  onClick={() => applyCustomBoard(p.board.join(","))}
-                  className="text-left p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-xs transition"
+                  key={preset.label}
+                  onClick={() => {
+                    setInputStr(preset.state);
+                    setResult(null);
+                    setCurrentStep(0);
+                    setIsPlaying(false);
+                  }}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    textAlign: "left",
+                    padding: "9px 12px",
+                    backgroundColor: "#161f33",
+                    border: "1px solid #26324d",
+                    borderRadius: "8px",
+                    color: "#e2e8f0",
+                    cursor: "pointer",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
                 >
-                  <div className="font-medium text-slate-200 truncate">{p.name}</div>
-                  <div className="font-mono text-[10px] text-slate-400 mt-0.5">{p.board.join(",")}</div>
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {preset.label}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "10px",
+                      color: "#34d399",
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    {preset.state}
+                  </div>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Algorithm Selector */}
-          <div className="p-5 rounded-2xl bg-[#0D111A] border border-white/10 space-y-3">
-            <span className="text-xs font-mono uppercase tracking-wider text-slate-400">2. Search Strategy</span>
-            <div className="space-y-2">
-              {ALGORITHMS.map((algo) => (
-                <button
-                  key={algo.id}
-                  onClick={() => setSelectedAlgo(algo.id)}
-                  className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition ${
-                    selectedAlgo === algo.id
-                      ? "bg-white/10 border-emerald-500/50 shadow-lg"
-                      : "bg-white/[0.02] border-white/5 hover:bg-white/5"
-                  }`}
-                >
-                  <div>
-                    <div className="font-semibold text-sm">{algo.name}</div>
-                    <div className="text-[11px] font-mono text-slate-400">{algo.badge}</div>
-                  </div>
-                  <div className={`w-2.5 h-2.5 rounded-full bg-gradient-to-r ${algo.color}`} />
-                </button>
-              ))}
+          {/* 2. Search Strategy Card */}
+          <div
+            style={{
+              backgroundColor: "#0f1523",
+              border: "1px solid #1e293b",
+              borderRadius: "14px",
+              padding: "18px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "11px",
+                fontWeight: 600,
+                letterSpacing: "0.08em",
+                color: "#94a3b8",
+                fontFamily: "monospace",
+                marginBottom: "12px",
+              }}
+            >
+              2. SEARCH STRATEGY
             </div>
 
-            <div className="pt-2 flex gap-2">
-              <button
-                onClick={handleSolve}
-                disabled={loading || !isSolvable}
-                className="flex-1 py-3 px-4 rounded-xl font-semibold text-sm bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 shadow-lg shadow-emerald-500/20 disabled:opacity-40 transition"
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {STRATEGIES.map((strat) => {
+                const selected = algorithm === strat.id;
+                return (
+                  <div
+                    key={strat.id}
+                    onClick={() => setAlgorithm(strat.id)}
+                    style={{
+                      padding: "11px 14px",
+                      borderRadius: "10px",
+                      backgroundColor: selected ? "rgba(16, 185, 129, 0.1)" : "#141c2e",
+                      border: selected ? "1px solid #10b981" : "1px solid #1e293b",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: "13px", fontWeight: 700, color: "#f8fafc" }}>
+                        {strat.name}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                        {strat.desc}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        width: "9px",
+                        height: "9px",
+                        borderRadius: "50%",
+                        backgroundColor: strat.color,
+                        boxShadow: `0 0 8px ${strat.color}`,
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Max Depth Input for IDDFS */}
+            {algorithm === "iddfs" && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "10px 12px",
+                  backgroundColor: "#141c2e",
+                  borderRadius: "8px",
+                  border: "1px solid #26324d",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
               >
-                {loading ? "Executing..." : "Run Search & Trace"}
-              </button>
+                <span style={{ fontSize: "12px", color: "#cbd5e1" }}>Max Depth Limit:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={80}
+                  value={maxDepth}
+                  onChange={(e) => setMaxDepth(e.target.value)}
+                  style={{
+                    width: "64px",
+                    padding: "4px 8px",
+                    backgroundColor: "#090d16",
+                    border: "1px solid #334155",
+                    borderRadius: "6px",
+                    color: "#f97316",
+                    fontFamily: "monospace",
+                    fontWeight: 700,
+                    textAlign: "center",
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", gap: "10px", marginTop: "16px" }}>
               <button
-                onClick={handleBenchmarkAll}
+                onClick={handleRunSearch}
                 disabled={loading || !isSolvable}
-                className="py-3 px-4 rounded-xl font-mono text-xs bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 transition"
-                title="Compare all 5 algorithms side-by-side"
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: "10px",
+                  border: "none",
+                  backgroundColor: !isSolvable ? "#334155" : "#10b981",
+                  color: "#052e16",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  cursor: !isSolvable ? "not-allowed" : "pointer",
+                }}
+              >
+                {loading ? "Solving..." : "Run Search & Trace"}
+              </button>
+
+              <button
+                onClick={handleRunArena}
+                disabled={loading || !isSolvable}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: "10px",
+                  border: "1px solid #334155",
+                  backgroundColor: "#161f33",
+                  color: "#e2e8f0",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: !isSolvable ? "not-allowed" : "pointer",
+                }}
               >
                 Arena Race
               </button>
             </div>
           </div>
-        </section>
+        </div>
 
-        {/* Center Column: Kinetic 3x3 Board & DVR Scrubber */}
-        <section className="lg:col-span-4 flex flex-col items-center justify-between p-6 rounded-2xl bg-[#0D111A] border border-white/10 shadow-2xl">
-          <div className="w-full flex items-center justify-between text-xs font-mono text-slate-400">
-            <span>STEP: {currentStep} / {telemetry?.traceable_steps ? telemetry.traceable_steps.length - 1 : 0}</span>
-            <span className="text-emerald-400">LIVE h(n) = {liveBoardManhattan}</span>
+        {/* CENTER COLUMN: Interactive 3x3 Board & Playback Mode Controls */}
+        <div
+          style={{
+            backgroundColor: "#0f1523",
+            border: "1px solid #1e293b",
+            borderRadius: "14px",
+            padding: "20px 24px",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            minHeight: "610px",
+          }}
+        >
+          {/* Top Status Row */}
+          <div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                fontFamily: "monospace",
+                fontSize: "12px",
+                marginBottom: "14px",
+              }}
+            >
+              <span style={{ color: "#94a3b8" }}>
+                {playbackMode === "expansion" ? "EXPANSION FRAME: " : "STEP: "}
+                <strong style={{ color: "#f8fafc" }}>{currentStep}</strong> /{" "}
+                {Math.max(0, activeSteps.length - 1)}
+              </span>
+              <span style={{ color: "#10b981", fontWeight: 600 }}>
+                LIVE h(n) = {liveHeuristic}
+              </span>
+            </div>
+
+            {/* Mode Toggle: Goal Path vs Live Expansion */}
+            {result && result.algorithm !== "DFS" && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  justifyContent: "center",
+                  marginBottom: "12px",
+                }}
+              >
+                <button
+                  onClick={() => {
+                    setPlaybackMode("goal");
+                    setCurrentStep(0);
+                    setIsPlaying(false);
+                  }}
+                  style={{
+                    padding: "7px 14px",
+                    borderRadius: "8px",
+                    border:
+                      playbackMode === "goal" ? "1px solid #10b981" : "1px solid #26324d",
+                    backgroundColor:
+                      playbackMode === "goal" ? "rgba(16, 185, 129, 0.16)" : "#141c2e",
+                    color: playbackMode === "goal" ? "#10b981" : "#94a3b8",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  🎯 Goal Path ({Math.max(0, (result.traceable_steps?.length || 1) - 1)} moves)
+                </button>
+
+                <button
+                  onClick={() => {
+                    setPlaybackMode("expansion");
+                    setCurrentStep(0);
+                    setIsPlaying(false);
+                  }}
+                  style={{
+                    padding: "7px 14px",
+                    borderRadius: "8px",
+                    border:
+                      playbackMode === "expansion"
+                        ? "1px solid #f59e0b"
+                        : "1px solid #26324d",
+                    backgroundColor:
+                      playbackMode === "expansion"
+                        ? "rgba(245, 158, 11, 0.16)"
+                        : "#141c2e",
+                    color: playbackMode === "expansion" ? "#fbbf24" : "#94a3b8",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  🔍 Live Expansion ({result.expanded_steps?.length || 0} frames)
+                </button>
+              </div>
+            )}
+
+            {/* Current Move / Depth Limit Badge */}
+            {result && (
+              <div style={{ textAlign: "center", marginBottom: "8px" }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    padding: "4px 12px",
+                    borderRadius: "999px",
+                    fontSize: "12px",
+                    fontFamily: "monospace",
+                    fontWeight: 600,
+                    backgroundColor:
+                      playbackMode === "expansion"
+                        ? "rgba(245, 158, 11, 0.12)"
+                        : "rgba(59, 130, 246, 0.12)",
+                    color: playbackMode === "expansion" ? "#fbbf24" : "#60a5fa",
+                    border:
+                      playbackMode === "expansion"
+                        ? "1px solid rgba(245, 158, 11, 0.35)"
+                        : "1px solid rgba(59, 130, 246, 0.35)",
+                  }}
+                >
+                  {playbackMode === "expansion"
+                    ? `Exploring: ${currentActionLabel}`
+                    : `Action: ${currentActionLabel}`}
+                </span>
+              </div>
+            )}
           </div>
 
-          {/* 3x3 Tactile Grid */}
-          <div className="relative grid grid-cols-3 gap-3 p-4 my-4 rounded-2xl bg-[#05070B] border border-white/10 w-72 h-72 shadow-inner">
-            {activeBoard.map((tile, idx) => {
+          {/* 3x3 Puzzle Board */}
+          <div
+            style={{
+              width: "310px",
+              height: "310px",
+              margin: "12px auto",
+              padding: "16px",
+              backgroundColor: "#090d16",
+              borderRadius: "20px",
+              border: "1px solid #1e293b",
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gridTemplateRows: "repeat(3, 1fr)",
+              gap: "12px",
+              boxShadow: "inset 0 2px 12px rgba(0,0,0,0.6)",
+            }}
+          >
+            {currentBoard.map((tile, idx) => {
               if (tile === 0) {
                 return (
                   <div
-                    key="blank-slot"
-                    className="rounded-xl border border-dashed border-white/10 bg-white/[0.01] flex items-center justify-center text-[10px] font-mono text-slate-600"
+                    key="blank-tile"
+                    style={{
+                      borderRadius: "14px",
+                      border: "1px dashed #26324d",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#475569",
+                      fontFamily: "monospace",
+                      fontSize: "11px",
+                    }}
                   >
                     BLANK (0)
                   </div>
                 );
               }
 
-              const dist = tileManhattanDist(tile, idx);
-              const heatStyle = heatmapMode
-                ? dist === 0
-                  ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200 shadow-emerald-500/10"
+              const dist = getTileDistance(tile, idx);
+              const borderColor =
+                dist === 0 ? "#10b981" : dist === 1 ? "#f59e0b" : "#f43f5e";
+              const bgColor =
+                dist === 0
+                  ? "rgba(16, 185, 129, 0.10)"
                   : dist === 1
-                  ? "border-amber-500/50 bg-amber-500/15 text-amber-200"
-                  : "border-rose-500/50 bg-rose-500/15 text-rose-200"
-                : "border-white/15 bg-slate-800/90 text-white";
+                  ? "rgba(245, 158, 11, 0.10)"
+                  : "rgba(244, 63, 94, 0.10)";
 
               return (
                 <motion.div
-                  layout
                   key={tile}
-                  transition={{ type: "spring", stiffness: 420, damping: 28 }}
-                  className={`relative rounded-xl border flex flex-col items-center justify-center shadow-lg select-none ${heatStyle}`}
+                  layout={speed <= 2.5}
+                  transition={{ type: "spring", stiffness: 350, damping: 28 }}
+                  style={{
+                    borderRadius: "14px",
+                    border: `1.5px solid ${borderColor}`,
+                    backgroundColor: bgColor,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    userSelect: "none",
+                  }}
                 >
-                  <span className="text-3xl font-bold tracking-tight font-mono">{tile}</span>
-                  {heatmapMode && (
-                    <span className="text-[9px] font-mono uppercase opacity-75 mt-0.5">
-                      {dist === 0 ? "LOCKED" : `Δ=${dist}`}
-                    </span>
-                  )}
+                  <span
+                    style={{
+                      fontSize: "26px",
+                      fontWeight: 800,
+                      color: "#f8fafc",
+                      lineHeight: 1.1,
+                    }}
+                  >
+                    {tile}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      fontFamily: "monospace",
+                      color: "#94a3b8",
+                      marginTop: "4px",
+                    }}
+                  >
+                    Δ={dist}
+                  </span>
                 </motion.div>
               );
             })}
           </div>
 
-          {/* DVR Playback Deck */}
-          <div className="w-full space-y-3">
+          {/* Bottom Scrubber & DVR Controls */}
+          <div>
             <input
               type="range"
               min={0}
-              max={Math.max(0, (telemetry?.traceable_steps?.length || 1) - 1)}
+              max={Math.max(0, activeSteps.length - 1)}
               value={currentStep}
               onChange={(e) => {
                 setIsPlaying(false);
-                const val = Number(e.target.value);
-                setCurrentStep(val);
-                sound.playTileMove(val, telemetry?.traceable_steps?.length || 1);
+                setCurrentStep(Number(e.target.value));
               }}
-              className="w-full accent-emerald-400 cursor-pointer"
+              style={{
+                width: "100%",
+                accentColor: playbackMode === "expansion" ? "#f59e0b" : "#10b981",
+                cursor: "pointer",
+                marginBottom: "12px",
+              }}
             />
 
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => { setIsPlaying(false); setCurrentStep(0); }}
-                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => {
-                    setIsPlaying(false);
-                    setCurrentStep((s) => Math.max(0, s - 1));
-                    sound.playTileMove(currentStep - 1, telemetry?.traceable_steps?.length || 1);
-                  }}
-                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10"
-                >
-                  <StepBack className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setIsPlaying(!isPlaying)}
-                  className="px-4 py-2 rounded-lg bg-emerald-500 text-slate-950 font-semibold flex items-center gap-1.5 text-xs"
-                >
-                  {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                  {isPlaying ? "PAUSE" : "PLAY"}
-                </button>
-                <button
-                  onClick={() => {
-                    setIsPlaying(false);
-                    const max = (telemetry?.traceable_steps?.length || 1) - 1;
-                    setCurrentStep((s) => Math.min(max, s + 1));
-                    sound.playTileMove(currentStep + 1, max);
-                  }}
-                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10"
-                >
-                  <StepForward className="w-4 h-4" />
-                </button>
-              </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <button
+                onClick={() => {
+                  setIsPlaying(false);
+                  setCurrentStep(0);
+                }}
+                title="Reset to Start"
+                style={dvrBtnStyle}
+              >
+                <RotateCcw size={15} />
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsPlaying(false);
+                  setCurrentStep((s) => Math.max(0, s - 1));
+                }}
+                title="Previous Step"
+                style={dvrBtnStyle}
+              >
+                <SkipBack size={15} />
+              </button>
+
+              <button
+                onClick={() => {
+                  if (activeSteps.length <= 1) return;
+                  if (currentStep >= activeSteps.length - 1) setCurrentStep(0);
+                  setIsPlaying(!isPlaying);
+                }}
+                style={{
+                  padding: "8px 18px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: playbackMode === "expansion" ? "#f59e0b" : "#10b981",
+                  color: "#052e16",
+                  fontWeight: 800,
+                  fontSize: "12px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                {isPlaying ? <Pause size={15} /> : <Play size={15} />}
+                {isPlaying ? "PAUSE" : "PLAY"}
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsPlaying(false);
+                  setCurrentStep((s) => Math.min(activeSteps.length - 1, s + 1));
+                }}
+                title="Next Step"
+                style={dvrBtnStyle}
+              >
+                <SkipForward size={15} />
+              </button>
 
               <select
-                value={speedMs}
-                onChange={(e) => setSpeedMs(Number(e.target.value))}
-                className="bg-black/60 border border-white/15 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-300"
+                value={speed}
+                onChange={(e) => setSpeed(Number(e.target.value))}
+                style={{
+                  backgroundColor: "#141c2e",
+                  color: "#e2e8f0",
+                  border: "1px solid #26324d",
+                  borderRadius: "8px",
+                  padding: "7px 10px",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
               >
-                <option value={700}>0.5x Slow</option>
-                <option value={380}>1.0x Normal</option>
-                <option value={150}>2.5x Fast</option>
-                <option value={40}>10x Turbo</option>
+                <option value={0.5}>0.5x Slow</option>
+                <option value={1}>1.0x Normal</option>
+                <option value={2.5}>2.5x Fast</option>
+                <option value={8}>8.0x Turbo</option>
+                <option value={25}>25x Warp</option>
               </select>
             </div>
           </div>
-        </section>
+        </div>
 
-        {/* Right Column: Deliverable Metrics HUD (Section 3.1) */}
-        <section className="lg:col-span-4 space-y-4">
-          <div className="p-5 rounded-2xl bg-[#0D111A] border border-white/10 space-y-4">
-            <span className="text-xs font-mono uppercase tracking-wider text-slate-400">
-              3. Deliverable Telemetry (Report Metrics)
-            </span>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3.5 rounded-xl bg-black/40 border border-white/5">
-                <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
-                  <Compass className="w-3.5 h-3.5 text-emerald-400" /> Cost of Path
-                </div>
-                <div className="text-2xl font-bold font-mono mt-1">{telemetry?.cost_of_path ?? "—"}</div>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-black/40 border border-white/5">
-                <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
-                  <Cpu className="w-3.5 h-3.5 text-cyan-400" /> Nodes Expanded
-                </div>
-                <div className="text-2xl font-bold font-mono mt-1">{telemetry?.nodes_expanded ?? "—"}</div>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-black/40 border border-white/5">
-                <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
-                  <Layers className="w-3.5 h-3.5 text-purple-400" /> Search Depth
-                </div>
-                <div className="text-2xl font-bold font-mono mt-1">
-                  {telemetry ? `${telemetry.search_depth} (Max ${telemetry.max_search_depth})` : "—"}
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-black/40 border border-white/5">
-                <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
-                  <Clock className="w-3.5 h-3.5 text-amber-400" /> Running Time
-                </div>
-                <div className="text-2xl font-bold font-mono mt-1">
-                  {telemetry ? `${telemetry.running_time_ms} ms` : "—"}
-                </div>
-              </div>
-            </div>
-
-            {/* Path to Goal Sequence */}
-             <div className="p-3.5 rounded-xl bg-black/40 border border-white/5">
-              <div className="flex justify-between items-center text-xs font-mono text-slate-400 mb-2">
-                <span>Path to Goal Sequence:</span>
-                {telemetry?.path_to_goal?.length > 200 && (
-                  <span className="text-[10px] text-emerald-400">
-                    Showing window around Step #{currentStep} (Total: {telemetry.path_to_goal.length})
-                  </span>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-                {telemetry?.path_to_goal?.length > 0 ? (
-                  (() => {
-                    const total = telemetry.path_to_goal.length;
-                    const winStart = Math.max(0, currentStep - 50);
-                    const winEnd = Math.min(total, winStart + 150);
-                    const visibleMoves = telemetry.path_to_goal.slice(winStart, winEnd);
-
-                    return visibleMoves.map((act, i) => {
-                      const actualIdx = winStart + i;
-                      return (
-                        <span
-                          key={actualIdx}
-                          onClick={() => {
-                            setIsPlaying(false);
-                            setCurrentStep(actualIdx + 1);
-                          }}
-                          className={`cursor-pointer px-2 py-0.5 rounded text-xs font-mono border transition ${
-                            currentStep === actualIdx + 1
-                              ? "bg-emerald-500 text-slate-950 border-emerald-400 font-bold"
-                              : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10"
-                          }`}
-                        >
-                          {actualIdx + 1}. {act}
-                        </span>
-                      );
-                    });
-                  })()
-                ) : (
-                  <span className="text-xs font-mono text-slate-500">
-                    Run an algorithm to inspect move sequence.
-                  </span>
-                )}
-              </div>
-            </div>
+        {/* RIGHT COLUMN: Deliverable Telemetry & Sequence Window */}
+        <div
+          style={{
+            backgroundColor: "#0f1523",
+            border: "1px solid #1e293b",
+            borderRadius: "14px",
+            padding: "18px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "16px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "11px",
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              color: "#94a3b8",
+              fontFamily: "monospace",
+            }}
+          >
+            3. DELIVERABLE TELEMETRY (REPORT METRICS)
           </div>
-        </section>
-      </main>
 
-      {/* Traceable Parent -> Child Matrix Ribbon (Matches PDF Section 1 & 3 Diagram) */}
-   {/* Traceable Parent -> Child Matrix Ribbon (Windowed for 60FPS performance) */}
-      {telemetry?.traceable_steps?.length > 0 && (
-        <section className="max-w-7xl mx-auto mt-6 p-5 rounded-2xl bg-[#0D111A] border border-white/10">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <div className="text-xs font-mono uppercase tracking-wider text-slate-400">
-              4. Traceable Parent → Child State Transitions (Click any matrix to jump)
-            </div>
-            {telemetry.traceable_steps.length > 40 && (
-              <div className="text-xs font-mono text-emerald-400">
-                Live Window: Steps {Math.max(0, currentStep - 10)} –{" "}
-                {Math.min(telemetry.traceable_steps.length - 1, Math.max(0, currentStep - 10) + 30)}{" "}
-                of {telemetry.traceable_steps.length - 1}
-              </div>
-            )}
+          {/* 2x2 Metrics Grid */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "12px",
+            }}
+          >
+            <MetricCard
+              icon={<Compass size={14} color="#10b981" />}
+              label="Cost of Path"
+              value={result ? result.cost_of_path : "—"}
+            />
+            <MetricCard
+              icon={<Cpu size={14} color="#3b82f6" />}
+              label="Nodes Expanded"
+              value={result ? result.nodes_expanded : "—"}
+            />
+            <MetricCard
+              icon={<Layers size={14} color="#a855f7" />}
+              label="Search Depth"
+              value={
+                result ? `${result.search_depth} (Max ${result.max_search_depth})` : "—"
+              }
+            />
+            <MetricCard
+              icon={<Clock size={14} color="#f59e0b" />}
+              label="Running Time"
+              value={result ? `${result.running_time_ms} ms` : "—"}
+            />
           </div>
-          <div className="flex items-center gap-3 overflow-x-auto pb-2">
-            {(() => {
-              const total = telemetry.traceable_steps.length;
-              const startIdx = Math.max(0, currentStep - 10);
-              const endIdx = Math.min(total, startIdx + 30);
-              const visibleSteps = telemetry.traceable_steps.slice(startIdx, endIdx);
 
-              return visibleSteps.map((snap, i) => {
-                const actualIdx = startIdx + i;
-                return (
-                  <React.Fragment key={actualIdx}>
-                    <div
+          {/* Sequence Log Box (Virtualized Window) */}
+          <div
+            style={{
+              backgroundColor: "#090d16",
+              border: "1px solid #1e293b",
+              borderRadius: "12px",
+              padding: "14px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "10px",
+                fontSize: "11px",
+                fontFamily: "monospace",
+              }}
+            >
+              <span style={{ color: "#94a3b8" }}>
+                {playbackMode === "expansion"
+                  ? "Live Expansion Log:"
+                  : "Path to Goal Sequence:"}
+              </span>
+              {sequenceWindow.items?.length > 0 && (
+                <span style={{ color: "#10b981" }}>
+                  Window around #{currentStep} (Total: {sequenceWindow.total})
+                </span>
+              )}
+            </div>
+
+            <div
+              style={{
+                maxHeight: "230px",
+                overflowY: "auto",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "6px",
+              }}
+            >
+              {!result ? (
+                <span style={{ fontSize: "12px", color: "#475569" }}>
+                  Click &quot;Run Search &amp; Trace&quot; to inspect steps...
+                </span>
+              ) : (
+                sequenceWindow.items?.map((stepObj) => {
+                  const isCurrent = stepObj.step_number === currentStep;
+                  const isNewLimit =
+                    playbackMode === "expansion" &&
+                    stepObj.action.includes("• Initial (d=0)");
+
+                  return (
+                    <button
+                      key={stepObj.step_number}
                       onClick={() => {
                         setIsPlaying(false);
-                        setCurrentStep(actualIdx);
+                        setCurrentStep(stepObj.step_number);
                       }}
-                      className={`cursor-pointer shrink-0 p-2.5 rounded-xl border transition ${
-                        currentStep === actualIdx
-                          ? "bg-emerald-500/15 border-emerald-400 shadow-lg shadow-emerald-500/10"
-                          : "bg-black/40 border-white/10 hover:border-white/25"
-                      }`}
+                      style={{
+                        padding: "5px 9px",
+                        borderRadius: "6px",
+                        fontFamily: "monospace",
+                        fontSize: "11px",
+                        cursor: "pointer",
+                        border: isCurrent
+                          ? "1px solid #10b981"
+                          : isNewLimit
+                          ? "1px solid rgba(249, 115, 22, 0.6)"
+                          : "1px solid #1e293b",
+                        backgroundColor: isCurrent
+                          ? "rgba(16, 185, 129, 0.2)"
+                          : isNewLimit
+                          ? "rgba(249, 115, 22, 0.15)"
+                          : "#141c2e",
+                        color: isCurrent
+                          ? "#34d399"
+                          : isNewLimit
+                          ? "#fdba74"
+                          : "#cbd5e1",
+                      }}
                     >
-                      <div className="text-[10px] font-mono text-slate-400 mb-1 flex justify-between gap-2">
-                        <span>#{actualIdx}</span>
-                        <span className="text-emerald-400">{snap.action}</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-1 w-20 h-20">
-                        {snap.board.map((cell, cIdx) => (
-                          <div
-                            key={cIdx}
-                            className={`flex items-center justify-center text-xs font-mono rounded ${
-                              cell === 0 ? "bg-white/5 text-slate-600" : "bg-white/10 text-slate-200"
-                            }`}
-                          >
-                            {cell === 0 ? "·" : cell}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {actualIdx < total - 1 && (
-                      <span className="text-slate-500 font-mono text-sm shrink-0">⇒</span>
-                    )}
-                  </React.Fragment>
-                );
-              });
-            })()}
+                      {stepObj.step_number}. {stepObj.action}
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
-        </section>
-      )}
+        </div>
+      </div>
 
-      {/* Multi-Algorithm Benchmark Table for Section 2.2 Report */}
-      {benchmarkData.length > 0 && (
-        <section className="max-w-7xl mx-auto mt-6 p-5 rounded-2xl bg-[#0D111A] border border-white/10">
-          <div className="text-xs font-mono uppercase tracking-wider text-emerald-400 mb-3">
-            5. Head-to-Head Heuristic & Uninformed Benchmark (Ready for Report Section 2.2 & 3.1)
+      {/* Arena Benchmark Comparison Table */}
+      {arenaResults && (
+        <div
+          style={{
+            maxWidth: "1380px",
+            margin: "24px auto 0 auto",
+            backgroundColor: "#0f1523",
+            border: "1px solid #1e293b",
+            borderRadius: "14px",
+            padding: "20px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              marginBottom: "14px",
+              fontSize: "14px",
+              fontWeight: 700,
+            }}
+          >
+            <Trophy size={18} color="#f59e0b" />
+            <span>Arena Multi-Algorithm Benchmark Comparison</span>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse font-mono text-xs">
+
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontFamily: "monospace",
+                fontSize: "13px",
+                textAlign: "left",
+              }}
+            >
               <thead>
-                <tr className="border-b border-white/10 text-slate-400">
-                  <th className="py-2.5 px-3">Algorithm</th>
-                  <th className="py-2.5 px-3">Cost of Path</th>
-                  <th className="py-2.5 px-3">Nodes Expanded</th>
-                  <th className="py-2.5 px-3">Search Depth</th>
-                  <th className="py-2.5 px-3">Max Depth</th>
-                  <th className="py-2.5 px-3">Running Time (ms)</th>
+                <tr style={{ borderBottom: "1px solid #1e293b", color: "#94a3b8" }}>
+                  <th style={{ padding: "10px" }}>Algorithm</th>
+                  <th style={{ padding: "10px" }}>Cost of Path</th>
+                  <th style={{ padding: "10px" }}>Nodes Expanded</th>
+                  <th style={{ padding: "10px" }}>Search Depth</th>
+                  <th style={{ padding: "10px" }}>Max Depth</th>
+                  <th style={{ padding: "10px" }}>Running Time (ms)</th>
                 </tr>
               </thead>
               <tbody>
-                {benchmarkData.map((row) => (
-                  <tr key={row.algorithm} className="border-b border-white/5 hover:bg-white/[0.02]">
-                    <td className="py-2.5 px-3 font-semibold text-white">{row.algorithm}</td>
-                    <td className="py-2.5 px-3 text-emerald-400">{row.cost_of_path}</td>
-                    <td className="py-2.5 px-3 text-cyan-400">{row.nodes_expanded}</td>
-                    <td className="py-2.5 px-3">{row.search_depth}</td>
-                    <td className="py-2.5 px-3">{row.max_search_depth}</td>
-                    <td className="py-2.5 px-3 text-amber-400">{row.running_time_ms} ms</td>
+                {arenaResults.map((row) => (
+                  <tr key={row.algorithm} style={{ borderBottom: "1px solid #141c2e" }}>
+                    <td style={{ padding: "10px", fontWeight: 700, color: "#f8fafc" }}>
+                      {row.algorithm}
+                    </td>
+                    <td style={{ padding: "10px", color: "#10b981" }}>{row.cost_of_path}</td>
+                    <td style={{ padding: "10px", color: "#60a5fa" }}>{row.nodes_expanded}</td>
+                    <td style={{ padding: "10px" }}>{row.search_depth}</td>
+                    <td style={{ padding: "10px" }}>{row.max_search_depth}</td>
+                    <td style={{ padding: "10px", color: "#fbbf24" }}>
+                      {row.running_time_ms} ms
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
       )}
+    </div>
+  );
+}
+
+const dvrBtnStyle = {
+  backgroundColor: "#141c2e",
+  border: "1px solid #26324d",
+  color: "#cbd5e1",
+  borderRadius: "8px",
+  padding: "8px 10px",
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+function MetricCard({ icon, label, value }) {
+  return (
+    <div
+      style={{
+        backgroundColor: "#090d16",
+        border: "1px solid #1e293b",
+        borderRadius: "12px",
+        padding: "14px",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          fontSize: "11px",
+          color: "#94a3b8",
+          marginBottom: "8px",
+        }}
+      >
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div
+        style={{
+          fontSize: "20px",
+          fontWeight: 800,
+          fontFamily: "monospace",
+          color: "#f8fafc",
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
