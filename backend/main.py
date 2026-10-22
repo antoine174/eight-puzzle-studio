@@ -1,23 +1,25 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from models import SolveRequest, SolveResponse
+from models import SolveRequest
 from utils import is_solvable
+
 from algorithms.bfs import solve_bfs
 from algorithms.dfs import solve_dfs
 from algorithms.iddfs import solve_iddfs
 from algorithms.astar_manhattan import solve_astar_manhattan
 from algorithms.astar_euclidean import solve_astar_euclidean
 
-app = FastAPI(title="8-Puzzle AI Telemetry Studio")
+app = FastAPI(title="8-Puzzle AI Search Studio")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-ALGO_MAP = {
+ALGORITHM_MAP = {
     "bfs": solve_bfs,
     "dfs": solve_dfs,
     "iddfs": solve_iddfs,
@@ -25,43 +27,47 @@ ALGO_MAP = {
     "astar_euclidean": solve_astar_euclidean,
 }
 
-@app.post("/api/solve", response_model=SolveResponse)
-def solve_puzzle(req: SolveRequest):
-    if sorted(req.initial_state) != [0, 1, 2, 3, 4, 5, 6, 7, 8]:
+# Safe cap per algorithm in Arena mode so 5 simultaneous boards never lag the browser
+ARENA_STEP_CAP = 500
+
+@app.post("/api/solve")
+async def solve_puzzle(request: SolveRequest):
+    if sorted(request.initial_state) != [0, 1, 2, 3, 4, 5, 6, 7, 8]:
         raise HTTPException(status_code=400, detail="Board must contain digits 0-8 exactly once.")
 
-    solvable, inversions = is_solvable(req.initial_state)
-    state_tuple = tuple(req.initial_state)
-
+    state = tuple(request.initial_state)
+    solvable, _ = is_solvable(list(state))
     if not solvable:
-        return {
-            "algorithm": req.algorithm,
-            "solvable": False,
-            "inversions": inversions,
-            "path_to_goal": [],
-            "cost_of_path": 0,
-            "nodes_expanded": 0,
-            "search_depth": 0,
-            "max_search_depth": 0,
-            "running_time_ms": 0.0,
-            "traceable_steps": [],
-            "explored_sample": [],
-        }
+        raise HTTPException(status_code=400, detail="Board is unsolvable (odd inversions).")
 
-    solver = ALGO_MAP.get(req.algorithm)
-    if not solver:
-        raise HTTPException(status_code=400, detail="Unknown algorithm")
+    algo_fn = ALGORITHM_MAP.get(request.algorithm)
+    if not algo_fn:
+        raise HTTPException(status_code=400, detail=f"Unknown algorithm: {request.algorithm}")
 
-    if req.algorithm == "iddfs":
-        return solver(state_tuple, req.max_depth)
-    return solver(state_tuple)
+    if request.algorithm == "iddfs":
+        return algo_fn(state, max_depth_limit=request.max_depth)
+    return algo_fn(state)
 
 @app.post("/api/benchmark")
-def benchmark_all(req: SolveRequest):
-    """Runs all 5 algorithms on the same board to generate the Section 2.2 & 3.1 comparison."""
-    state_tuple = tuple(req.initial_state)
-    results = []
-    for key, solver in ALGO_MAP.items():
-        res = solver(state_tuple) if key != "iddfs" else solver(state_tuple, req.max_depth)
-        results.append(res)
-    return {"results": results}
+async def benchmark_puzzle(request: SolveRequest):
+    if sorted(request.initial_state) != [0, 1, 2, 3, 4, 5, 6, 7, 8]:
+        raise HTTPException(status_code=400, detail="Board must contain digits 0-8 exactly once.")
+
+    state = tuple(request.initial_state)
+    solvable, _ = is_solvable(list(state))
+    if not solvable:
+        raise HTTPException(status_code=400, detail="Board is unsolvable (odd inversions).")
+
+    benchmarks = []
+
+    for algo_id, algo_fn in ALGORITHM_MAP.items():
+        if algo_id == "iddfs":
+            res = algo_fn(state, max_depth_limit=request.max_depth)
+        else:
+            res = algo_fn(state)
+
+        res["algo_id"] = algo_id
+        res["trace_truncated"] = False
+        benchmarks.append(res)
+
+    return {"benchmarks": benchmarks}
