@@ -15,25 +15,23 @@ def manhattan_heuristic(state: Tuple[int, ...]) -> float:
 def solve_astar_manhattan(initial_state: Tuple[int, ...]) -> dict:
     tracker = TelemetryTracker(initial_state)
     
-    counter = 0    
-    pq = [(manhattan_heuristic(initial_state), counter, initial_state, 0)]    
+    pq = [(manhattan_heuristic(initial_state), initial_state, 0)]
     g_costs = {initial_state: 0}
 
     while pq:
-        f_cost, _, state, depth = heapq.heappop(pq)
+        f_cost, state, depth = heapq.heappop(pq)
 
         if state == GOAL_STATE:
             return tracker.build_solution("A* (Manhattan)", goal_found=True, final_depth=depth)
-        
+
         tracker.record_expansion(state, depth)
 
         for move, child in get_neighbors(state):
-            new_depth = depth + 1    
+            new_depth = depth + 1
             if child not in g_costs or new_depth < g_costs[child]:
                 g_costs[child] = new_depth
                 tracker.record_child(state, child, move, new_depth)
                 f_score = new_depth + manhattan_heuristic(child)
-                counter += 1                
-                heapq.heappush(pq, (f_score, counter, child, new_depth))
+                heapq.heappush(pq, (f_score, child, new_depth))
 
     return tracker.build_solution("A* (Manhattan)", goal_found=False)
