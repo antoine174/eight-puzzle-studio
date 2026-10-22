@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Play,
   Pause,
@@ -7,7 +7,6 @@ import {
   SkipBack,
   SkipForward,
   Trophy,
-  ArrowLeft,
   BarChart3,
   Zap,
   Cpu,
@@ -21,6 +20,8 @@ import {
   MultiMetricRadarChart,
   ExpandedPlotModal,
 } from "./TelemetryCharts";
+import { AnimatedNumber, Segmented, stagger, rise, SPRING_SNAP } from "./ui";
+import { skin, TONE } from "../utils/theme";
 import {
   METRIC_CONFIGS,
   getAlgoColor,
@@ -187,178 +188,145 @@ export default function ArenaView({
   }, [arenaResults, isSolvable]);
 
   return (
-    <div style={{ maxWidth: "1480px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "22px" }}>
-      {/* 1. Master Broadcast Control Bar */}
-      <div
-        style={{
-          backgroundColor: "#0f1523",
-          border: "1px solid #26324d",
-          borderRadius: "16px",
-          padding: "16px 22px",
-          display: "flex",
-          flexWrap: "wrap",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: "16px",
-          boxShadow: "0 8px 30px rgba(0,0,0,0.45)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-          <button
-            onClick={onBack}
-            style={{
-              padding: "9px 14px",
-              borderRadius: "10px",
-              backgroundColor: "#161f33",
-              border: "1px solid #334155",
-              color: "#e2e8f0",
-              fontWeight: 700,
-              fontSize: "12px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-            }}
-          >
-            <ArrowLeft size={15} />
-            Back
-          </button>
-
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <Trophy size={18} color="#f59e0b" />
-              <span style={{ fontSize: "16px", fontWeight: 800 }}>
-                Multi-Algorithm Arena Command Center
-              </span>
-              <span
-                style={{
-                  fontFamily: "monospace",
-                  fontSize: "12px",
-                  padding: "2px 8px",
-                  borderRadius: "6px",
-                  backgroundColor: "#090d16",
-                  border: "1px solid #10b981",
-                  color: "#34d399",
-                }}
-              >
-                Board: [{inputStr}]
-              </span>
-            </div>
-            <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "3px" }}>
-              Full uncapped paths loaded • Race all 5 boards together or scrub each individually
-            </div>
+    <motion.div className="arena" variants={stagger(0.12)} initial="hidden" animate="show">
+      {/* 1. Master broadcast console */}
+      <motion.section className="glass z3 arena-hero" variants={rise}>
+        <div>
+          <div className="eyebrow">
+            <Trophy size={13} color={TONE.amber} />
+            <b style={{ color: TONE.amber }}>Arena</b> · multi-algorithm command centre
+          </div>
+          <h2 className="arena-title">
+            Five minds,
+            <em>one board.</em>
+          </h2>
+          <div className="board-tag">BOARD [{inputStr}]</div>
+          <div className="eyebrow" style={{ marginTop: 18, maxWidth: 420 }}>
+            Full uncapped paths loaded
           </div>
         </div>
 
-        {/* Master Timeline Controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: 1, maxWidth: "560px" }}>
-          <button onClick={handleMasterReset} style={miniBtnStyle} title="Reset All 5 Boards">
-            <RotateCcw size={15} />
-          </button>
-
-          <button
-            onClick={() => {
-              if (masterStep >= maxArenaSteps) handleMasterScrub(0);
-              setMasterPlaying(!masterPlaying);
-            }}
-            style={{
-              padding: "9px 18px",
-              borderRadius: "10px",
-              border: "none",
-              backgroundColor: masterPlaying ? "#f59e0b" : "#10b981",
-              color: "#052e16",
-              fontWeight: 800,
-              fontSize: "12px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {masterPlaying ? <Pause size={15} /> : <Play size={15} />}
-            {masterPlaying ? "PAUSE ALL 5" : "RACE ALL 5"}
-          </button>
-
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "4px" }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: "10px",
-                fontFamily: "monospace",
-                color: "#94a3b8",
-              }}
+        <div className="arena-ctrl">
+          <div className="arena-ctrl-row">
+            <motion.button
+              type="button"
+              className="btn btn-ghost btn-icon"
+              onClick={handleMasterReset}
+              title="Reset All 5 Boards"
+              whileTap={{ scale: 0.88, rotate: -120 }}
             >
-              <span>MASTER TIMELINE</span>
-              <span>
+              <RotateCcw size={15} />
+            </motion.button>
+
+            <motion.button
+              type="button"
+              className={`btn ${masterPlaying ? "btn-amber" : "btn-primary"}`}
+              onClick={() => {
+                if (masterStep >= maxArenaSteps) handleMasterScrub(0);
+                setMasterPlaying(!masterPlaying);
+              }}
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.96 }}
+              style={{ minWidth: 168 }}
+            >
+              {masterPlaying ? <Pause size={15} /> : <Play size={15} />}
+              {masterPlaying ? "Pause all 5" : "Race all 5"}
+            </motion.button>
+
+            <Segmented
+              layoutKey="master-speed"
+              small
+              accent={TONE.amber}
+              value={masterSpeed}
+              onChange={(v) => setMasterSpeed(Number(v))}
+              options={[
+                { value: 0.5, label: "0.5×", title: "0.5x Slow" },
+                { value: 1, label: "1×", title: "1.0x Normal" },
+                { value: 2.5, label: "2.5×", title: "2.5x Fast" },
+                { value: 10, label: "10×", title: "10x Turbo" },
+                { value: 50, label: "50×", title: "50x Warp" },
+              ]}
+            />
+          </div>
+
+          <div>
+            <div className="eyebrow" style={{ justifyContent: "space-between", marginBottom: 2 }}>
+              <span>Master timeline</span>
+              <span style={{ flex: "none" }}>
                 STEP {masterStep.toLocaleString()} / {maxArenaSteps.toLocaleString()}
               </span>
             </div>
             <input
               type="range"
+              className="scrub"
+              style={{ "--p": `${maxArenaSteps > 0 ? (masterStep / maxArenaSteps) * 100 : 0}%`, "--ac": TONE.amber }}
               min={0}
               max={maxArenaSteps}
               value={masterStep}
               onChange={(e) => handleMasterScrub(Number(e.target.value))}
-              style={{ width: "100%", accentColor: "#10b981", cursor: "pointer" }}
+              aria-label="Master timeline"
             />
+            <div className="lanes">
+              {arenaResults.map((r) => {
+                const st = arenaStates[r.algorithm] || { step: 0, isPlaying: false, mode: "goal" };
+                const steps =
+                  st.mode === "expansion" && r.expanded_steps?.length
+                    ? r.expanded_steps
+                    : r.traceable_steps || [];
+                const mx = Math.max(0, steps.length - 1);
+                const frac = mx > 0 ? Math.min(1, st.step / mx) : 0;
+                return (
+                  <div key={r.algorithm} className="lane" style={{ "--c": skin(getAlgoColor(r.algorithm)) }}>
+                    <motion.i animate={{ width: `${frac * 100}%` }} transition={{ type: "spring", stiffness: 140, damping: 24 }} />
+                  </div>
+                );
+              })}
+            </div>
           </div>
-
-          <select
-            value={masterSpeed}
-            onChange={(e) => setMasterSpeed(Number(e.target.value))}
-            style={{
-              backgroundColor: "#141c2e",
-              color: "#e2e8f0",
-              border: "1px solid #26324d",
-              borderRadius: "8px",
-              padding: "8px 10px",
-              fontSize: "12px",
-              cursor: "pointer",
-            }}
-          >
-            <option value={0.5}>0.5x Slow</option>
-            <option value={1}>1.0x Normal</option>
-            <option value={2.5}>2.5x Fast</option>
-            <option value={10}>10x Turbo</option>
-            <option value={50}>50x Warp</option>
-          </select>
         </div>
-      </div>
+      </motion.section>
 
-      {/* 2. Executive Podium Highlights */}
+      {/* 2. Podium — staggered elevations */}
       {arenaAwards && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+        <motion.section className="podium" variants={stagger(0.14)}>
           <PodiumCard
-            icon={<Zap size={18} color="#fbbf24" />}
-            badge="SPEED CHAMPION"
+            rank="02"
+            icon={<Zap size={16} />}
+            badge="Speed champion"
             title={arenaAwards.fastest.algorithm}
-            metric={`${arenaAwards.fastest.running_time_ms} ms`}
+            metric={<AnimatedNumber value={arenaAwards.fastest.running_time_ms} />}
+            unit="ms"
             sub="Lowest execution latency on backend"
-            borderColor="rgba(251, 191, 36, 0.35)"
+            accent={TONE.amberHot}
           />
           <PodiumCard
-            icon={<Cpu size={18} color="#38bdf8" />}
-            badge="SMARTEST HEURISTIC (FEWEST NODES)"
+            rank="01"
+            icon={<Cpu size={16} />}
+            badge="Smartest heuristic · fewest nodes"
             title={arenaAwards.fewestNodes.algorithm}
-            metric={`${arenaAwards.fewestNodes.nodes_expanded.toLocaleString()} nodes`}
+            metric={<AnimatedNumber value={arenaAwards.fewestNodes.nodes_expanded} />}
+            unit="nodes"
             sub="Highest pruning efficiency in state space"
-            borderColor="rgba(56, 189, 248, 0.35)"
+            accent={TONE.cyan}
           />
           <PodiumCard
-            icon={<Award size={18} color="#10b981" />}
-            badge="OPTIMAL SHORTEST PATH"
-            title={`${arenaAwards.minCostVal} Moves`}
-            metric={arenaAwards.optimalAlgos}
+            rank="03"
+            icon={<Award size={16} />}
+            badge="Optimal shortest path"
+            title={
+              <>
+                <AnimatedNumber value={arenaAwards.minCostVal} /> Moves
+              </>
+            }
+            metric={<span style={{ fontSize: "0.6em", letterSpacing: "-0.03em" }}>{arenaAwards.optimalAlgos}</span>}
             sub="Guaranteed minimum solution cost"
-            borderColor="rgba(16, 185, 129, 0.35)"
+            accent={TONE.emerald}
           />
-        </div>
+        </motion.section>
       )}
 
-      {/* 3. Five Simultaneous Interactive Algorithm Board Decks */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "14px" }}>
+      {/* 3. Five simultaneous algorithm decks */}
+      <motion.section className="decks" variants={stagger(0.1)}>
         {arenaResults.map((r) => {
           const st = arenaStates[r.algorithm] || { step: 0, isPlaying: false, mode: "goal" };
           const steps =
@@ -386,144 +354,63 @@ export default function ArenaView({
           };
 
           return (
-            <div
+            <motion.article
               key={r.algorithm}
-              style={{
-                backgroundColor: "#0f1523",
-                border: isGoalReached ? "1.5px solid #10b981" : "1px solid #1e293b",
-                borderRadius: "14px",
-                padding: "14px",
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "space-between",
-                gap: "10px",
-              }}
+              className="glass z2 deck"
+              style={{ "--c": skin(accent) }}
+              variants={rise}
+              whileHover={{ y: -6 }}
+              transition={SPRING_SNAP}
             >
-              <div>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "6px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
-                    <span
-                      style={{
-                        width: "9px",
-                        height: "9px",
-                        borderRadius: "50%",
-                        backgroundColor: accent,
-                        boxShadow: `0 0 8px ${accent}`,
-                      }}
-                    />
-                    <span style={{ fontWeight: 800, fontSize: "13px" }}>{r.algorithm}</span>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: "10px",
-                      fontFamily: "monospace",
-                      padding: "2px 6px",
-                      borderRadius: "6px",
-                      backgroundColor: isGoalReached
-                        ? "rgba(16, 185, 129, 0.2)"
-                        : "#141c2e",
-                      color: isGoalReached ? "#34d399" : "#94a3b8",
-                    }}
+              <div className="deck-head">
+                <div className="deck-name">
+                  <i />
+                  <span>{r.algorithm}</span>
+                </div>
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={isGoalReached ? "solved" : "h"}
+                    className={`h-badge ${isGoalReached ? "solved" : ""}`}
+                    initial={{ scale: 0.6, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.6, opacity: 0 }}
+                    transition={{ duration: 0.18 }}
                   >
                     {isGoalReached ? "SOLVED ✓" : `h=${getBoardManhattan(frameObj.board)}`}
-                  </span>
-                </div>
-
-                {r.algorithm !== "DFS" ? (
-                  <div style={{ display: "flex", gap: "4px", marginBottom: "6px" }}>
-                    <button
-                      onClick={() => updateCardState({ mode: "goal", step: 0, isPlaying: false })}
-                      style={{
-                        flex: 1,
-                        padding: "4px 6px",
-                        fontSize: "10px",
-                        fontWeight: 700,
-                        borderRadius: "6px",
-                        cursor: "pointer",
-                        border: st.mode === "goal" ? "1px solid #10b981" : "1px solid #1e293b",
-                        backgroundColor:
-                          st.mode === "goal" ? "rgba(16, 185, 129, 0.14)" : "#090d16",
-                        color: st.mode === "goal" ? "#34d399" : "#64748b",
-                      }}
-                    >
-                      Goal ({r.cost_of_path})
-                    </button>
-                    <button
-                      onClick={() =>
-                        updateCardState({ mode: "expansion", step: 0, isPlaying: false })
-                      }
-                      style={{
-                        flex: 1,
-                        padding: "4px 6px",
-                        fontSize: "10px",
-                        fontWeight: 700,
-                        borderRadius: "6px",
-                        cursor: "pointer",
-                        border:
-                          st.mode === "expansion" ? "1px solid #f59e0b" : "1px solid #1e293b",
-                        backgroundColor:
-                          st.mode === "expansion" ? "rgba(245, 158, 11, 0.14)" : "#090d16",
-                        color: st.mode === "expansion" ? "#fbbf24" : "#64748b",
-                      }}
-                    >
-                      Expand ({r.expanded_steps?.length || 0})
-                    </button>
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      fontSize: "10px",
-                      fontFamily: "monospace",
-                      color: "#a855f7",
-                      backgroundColor: "rgba(168, 85, 247, 0.1)",
-                      padding: "4px 8px",
-                      borderRadius: "6px",
-                      textAlign: "center",
-                      marginBottom: "6px",
-                    }}
-                  >
-                    Full Goal Path ({r.cost_of_path.toLocaleString()} moves)
-                  </div>
-                )}
+                  </motion.span>
+                </AnimatePresence>
               </div>
 
-              <PuzzleBoardGrid board={frameObj.board} size={185} compact animateLayout={false} />
+              {r.algorithm !== "DFS" ? (
+                <Segmented
+                  small
+                  layoutKey={`mode-${r.algorithm}`}
+                  accent={st.mode === "goal" ? TONE.emerald : TONE.amber}
+                  value={st.mode}
+                  onChange={(mode) => updateCardState({ mode, step: 0, isPlaying: false })}
+                  options={[
+                    { value: "goal", label: `Goal (${r.cost_of_path})` },
+                    { value: "expansion", label: `Expand (${r.expanded_steps?.length || 0})` },
+                  ]}
+                />
+              ) : (
+                <div className="deck-note">Full goal path ({r.cost_of_path.toLocaleString()} moves)</div>
+              )}
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: "10px",
-                  fontFamily: "monospace",
-                  color: "#94a3b8",
-                }}
-              >
+              <PuzzleBoardGrid board={frameObj.board} size={210} compact animateLayout={false} />
+
+              <div className="deck-info">
                 <span>
                   #{safeIdx.toLocaleString()}/{maxIdx.toLocaleString()}
                 </span>
-                <span
-                  style={{
-                    color: "#e2e8f0",
-                    maxWidth: "110px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {frameObj.action}
-                </span>
+                <span>{frameObj.action}</span>
               </div>
 
               <div>
                 <input
                   type="range"
+                  className="scrub"
+                  style={{ "--p": `${maxIdx > 0 ? (safeIdx / maxIdx) * 100 : 0}%`, "--ac": skin(accent) }}
                   min={0}
                   max={maxIdx}
                   value={safeIdx}
@@ -531,301 +418,206 @@ export default function ArenaView({
                     setMasterPlaying(false);
                     updateCardState({ step: Number(e.target.value), isPlaying: false });
                   }}
-                  style={{ width: "100%", accentColor: accent, cursor: "pointer", marginBottom: "6px" }}
+                  aria-label={`${r.algorithm} scrubber`}
                 />
 
-                <div style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}>
-                  <button
+                <div className="deck-btns">
+                  <motion.button
+                    type="button"
+                    className="mini"
                     onClick={() => updateCardState({ step: 0, isPlaying: false })}
-                    style={miniBtnStyle}
+                    whileTap={{ scale: 0.85 }}
                   >
                     <RotateCcw size={12} />
-                  </button>
-                  <button
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    className="mini"
                     onClick={() =>
                       updateCardState({ step: Math.max(0, safeIdx - 1), isPlaying: false })
                     }
-                    style={miniBtnStyle}
+                    whileTap={{ scale: 0.85 }}
                   >
                     <SkipBack size={12} />
-                  </button>
-                  <button
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    className={`mini run ${st.isPlaying ? "paused" : ""}`}
                     onClick={() => {
                       setMasterPlaying(false);
                       const nextStep = safeIdx >= maxIdx ? 0 : safeIdx;
                       updateCardState({ step: nextStep, isPlaying: !st.isPlaying });
                     }}
-                    style={{
-                      ...miniBtnStyle,
-                      flex: 1,
-                      backgroundColor: st.isPlaying ? "#f59e0b" : accent,
-                      color: "#052e16",
-                      fontWeight: 800,
-                      border: "none",
-                    }}
+                    whileTap={{ scale: 0.92 }}
                   >
                     {st.isPlaying ? <Pause size={12} /> : <Play size={12} />}
-                    <span style={{ marginLeft: "4px", fontSize: "10px" }}>
-                      {st.isPlaying ? "PAUSE" : "RUN"}
-                    </span>
-                  </button>
-                  <button
+                    <span>{st.isPlaying ? "PAUSE" : "RUN"}</span>
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    className="mini"
                     onClick={() =>
                       updateCardState({ step: Math.min(maxIdx, safeIdx + 1), isPlaying: false })
                     }
-                    style={miniBtnStyle}
+                    whileTap={{ scale: 0.85 }}
                   >
                     <SkipForward size={12} />
-                  </button>
+                  </motion.button>
                 </div>
               </div>
-            </div>
+            </motion.article>
           );
         })}
-      </div>
+      </motion.section>
 
-      {/* 4. Graphical SVG Telemetry Plots + 5-Axis Radar Chart */}
-      <div>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "12px",
-            flexWrap: "wrap",
-            gap: "10px",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <BarChart3 size={18} color="#10b981" />
-            <span
-              style={{
-                fontSize: "12px",
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                color: "#94a3b8",
-                fontFamily: "monospace",
-              }}
-            >
-              GRAPHICAL TELEMETRY PLOTS (CLICK ANY GRAPH TO EXPAND)
-            </span>
+      {/* 4. HUD plots + radar */}
+      <motion.section variants={rise}>
+        <div className="section-head">
+          <div>
+            <div className="eyebrow">
+              <BarChart3 size={13} color={TONE.emerald} /> <b>Telemetry</b> · click any figure to expand
+            </div>
+            <h2 className="section-title">
+              Graphical <em>telemetry plots</em>
+            </h2>
           </div>
 
-          <div style={{ display: "flex", gap: "10px" }}>
-            {/* Graph Type Switcher */}
-            <div
-              style={{
-                display: "flex",
-                backgroundColor: "#0f1523",
-                padding: "4px",
-                borderRadius: "8px",
-                border: "1px solid #1e293b",
-              }}
-            >
-              <button
-                onClick={() => setChartType("bar")}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  border: "none",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                  fontSize: "11px",
-                  backgroundColor: chartType === "bar" ? "#3b82f6" : "transparent",
-                  color: chartType === "bar" ? "#f8fafc" : "#94a3b8",
-                }}
-              >
-                Column Bars
-              </button>
-              <button
-                onClick={() => setChartType("line")}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  border: "none",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                  fontSize: "11px",
-                  backgroundColor: chartType === "line" ? "#3b82f6" : "transparent",
-                  color: chartType === "line" ? "#f8fafc" : "#94a3b8",
-                }}
-              >
-                Area / Line Curves
-              </button>
-            </div>
-
-            {/* Log10 vs Linear Switcher */}
-            <div
-              style={{
-                display: "flex",
-                backgroundColor: "#0f1523",
-                padding: "4px",
-                borderRadius: "8px",
-                border: "1px solid #1e293b",
-              }}
-            >
-              <button
-                onClick={() => setLogScale(true)}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  border: "none",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                  fontSize: "11px",
-                  backgroundColor: logScale ? "#10b981" : "transparent",
-                  color: logScale ? "#052e16" : "#94a3b8",
-                }}
-              >
-                Log₁₀ Scale
-              </button>
-              <button
-                onClick={() => setLogScale(false)}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  border: "none",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                  fontSize: "11px",
-                  backgroundColor: !logScale ? "#10b981" : "transparent",
-                  color: !logScale ? "#052e16" : "#94a3b8",
-                }}
-              >
-                Linear Scale
-              </button>
-            </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Segmented
+              layoutKey="chart-type"
+              accent={TONE.cyan}
+              value={chartType}
+              onChange={setChartType}
+              options={[
+                { value: "bar", label: "Column bars" },
+                { value: "line", label: "Area / curves" },
+              ]}
+            />
+            <Segmented
+              layoutKey="chart-scale"
+              accent={TONE.emerald}
+              value={logScale}
+              onChange={setLogScale}
+              options={[
+                { value: true, label: "Log₁₀" },
+                { value: false, label: "Linear" },
+              ]}
+            />
           </div>
         </div>
 
-        {/* 3x2 Grid: 5 Metric Graphs + 1 Multi-Axis Radar Spider Chart */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "16px",
-          }}
-        >
-          {METRIC_CONFIGS.map((metric) => (
+        <div className="plots">
+          <MultiMetricRadarChart data={arenaResults} />
+          {METRIC_CONFIGS.map((metric, idx) => (
             <MetricPlotCard
               key={metric.key}
               metric={metric}
               data={arenaResults}
               logScale={logScale}
               chartType={chartType}
+              index={idx}
+              wide={idx === METRIC_CONFIGS.length - 1}
               onExpand={() => setExpandedMetric(metric)}
             />
           ))}
-          <MultiMetricRadarChart data={arenaResults} />
         </div>
-      </div>
+      </motion.section>
 
-      {/* 5. Official Benchmark Comparison Table */}
-      <div
-        style={{
-          backgroundColor: "#0f1523",
-          border: "1px solid #1e293b",
-          borderRadius: "14px",
-          padding: "20px",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "14px",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "15px", fontWeight: 800 }}>
-            <Trophy size={18} color="#f59e0b" />
-            <span>Arena Multi-Algorithm Benchmark Comparison</span>
+      {/* 5. Benchmark ledger */}
+      <motion.section className="glass z2 ledger" variants={rise}>
+        <div className="section-head" style={{ marginBottom: 18 }}>
+          <div>
+            <div className="eyebrow">
+              <Trophy size={13} color={TONE.amber} /> <b style={{ color: TONE.amber }}>Ledger</b> · official benchmark
+            </div>
+            <h2 className="section-title" style={{ fontSize: "clamp(26px,2.8vw,42px)" }}>
+              Arena multi-algorithm <em>comparison</em>
+            </h2>
           </div>
 
-          <button
+          <motion.button
+            type="button"
+            className={`btn ${copiedTable ? "btn-primary" : "btn-ghost"}`}
             onClick={handleCopyMarkdown}
-            style={{
-              padding: "7px 12px",
-              borderRadius: "8px",
-              backgroundColor: copiedTable ? "rgba(16, 185, 129, 0.2)" : "#161f33",
-              border: copiedTable ? "1px solid #10b981" : "1px solid #26324d",
-              color: copiedTable ? "#34d399" : "#cbd5e1",
-              fontSize: "12px",
-              fontWeight: 600,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-            }}
+            whileTap={{ scale: 0.95 }}
           >
-            {copiedTable ? <Check size={14} /> : <Copy size={14} />}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={copiedTable ? "c" : "n"}
+                style={{ display: "grid" }}
+                initial={{ opacity: 0, scale: 0.4, rotate: -40 }}
+                animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                exit={{ opacity: 0, scale: 0.4 }}
+                transition={{ duration: 0.16 }}
+              >
+                {copiedTable ? <Check size={14} /> : <Copy size={14} />}
+              </motion.span>
+            </AnimatePresence>
             {copiedTable ? "Copied Markdown!" : "Copy as Markdown Table"}
-          </button>
+          </motion.button>
         </div>
 
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            fontFamily: "monospace",
-            fontSize: "13px",
-            textAlign: "left",
-          }}
-        >
+        <table>
           <thead>
-            <tr style={{ borderBottom: "1px solid #1e293b", color: "#94a3b8" }}>
-              <th style={{ padding: "12px 10px" }}>Algorithm</th>
-              <th style={{ padding: "12px 10px" }}>Cost of Path</th>
-              <th style={{ padding: "12px 10px" }}>Nodes Expanded</th>
-              <th style={{ padding: "12px 10px" }}>Search Depth</th>
-              <th style={{ padding: "12px 10px" }}>Max Depth</th>
-              <th style={{ padding: "12px 10px" }}>Running Time (ms)</th>
+            <tr>
+              <th>Algorithm</th>
+              <th>Cost of Path</th>
+              <th>Nodes Expanded</th>
+              <th>Search Depth</th>
+              <th>Max Depth</th>
+              <th>Running Time (ms)</th>
             </tr>
           </thead>
-          <tbody>
+          <motion.tbody variants={stagger(0.08, 0.1)} initial="hidden" whileInView="show" viewport={{ once: true }}>
             {arenaResults.map((row) => {
-              const accent = getAlgoColor(row.algorithm);
+              const accent = skin(getAlgoColor(row.algorithm));
+              const cols = [
+                { k: "cost_of_path", v: row.cost_of_path, fmt: (v) => v.toLocaleString() },
+                { k: "nodes_expanded", v: row.nodes_expanded, fmt: (v) => v.toLocaleString() },
+                { k: "search_depth", v: row.search_depth, fmt: (v) => v.toLocaleString() },
+                { k: "max_search_depth", v: row.max_search_depth, fmt: (v) => v.toLocaleString() },
+                { k: "running_time_ms", v: row.running_time_ms, fmt: (v) => `${v} ms` },
+              ];
               return (
-                <tr key={row.algorithm} style={{ borderBottom: "1px solid #141c2e" }}>
-                  <td
-                    style={{
-                      padding: "12px 10px",
-                      fontWeight: 800,
-                      color: "#f8fafc",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: "8px",
-                        height: "8px",
-                        borderRadius: "50%",
-                        backgroundColor: accent,
-                      }}
-                    />
-                    {row.algorithm}
+                <motion.tr
+                  key={row.algorithm}
+                  style={{ "--c": accent }}
+                  variants={{
+                    hidden: { opacity: 0, x: -30 },
+                    show: { opacity: 1, x: 0, transition: { type: "spring", stiffness: 140, damping: 18 } },
+                  }}
+                >
+                  <td>
+                    <div className="cell-algo">
+                      <i />
+                      {row.algorithm}
+                    </div>
                   </td>
-                  <td style={{ padding: "12px 10px", color: "#10b981", fontWeight: 700 }}>
-                    {row.cost_of_path.toLocaleString()}
-                  </td>
-                  <td style={{ padding: "12px 10px", color: "#60a5fa", fontWeight: 700 }}>
-                    {row.nodes_expanded.toLocaleString()}
-                  </td>
-                  <td style={{ padding: "12px 10px" }}>{row.search_depth.toLocaleString()}</td>
-                  <td style={{ padding: "12px 10px", color: "#f97316" }}>
-                    {row.max_search_depth.toLocaleString()}
-                  </td>
-                  <td style={{ padding: "12px 10px", color: "#fbbf24", fontWeight: 700 }}>
-                    {row.running_time_ms} ms
-                  </td>
-                </tr>
+                  {cols.map((c) => {
+                    const all = arenaResults.map((x) => Number(x[c.k]) || 0);
+                    const mxv = Math.max(...all, 0.0001);
+                    const mnv = Math.min(...all);
+                    const val = Number(c.v) || 0;
+                    return (
+                      <td key={c.k}>
+                        <span className={`cell-val ${val === mnv ? "best" : ""}`}>{c.fmt(c.v)}</span>
+                        <span className="cell-bar">
+                          <motion.i
+                            initial={{ width: 0 }}
+                            whileInView={{ width: `${Math.max(3, (val / mxv) * 100)}%` }}
+                            viewport={{ once: true }}
+                            transition={{ type: "spring", stiffness: 50, damping: 16, delay: 0.3 }}
+                          />
+                        </span>
+                      </td>
+                    );
+                  })}
+                </motion.tr>
               );
             })}
-          </tbody>
+          </motion.tbody>
         </table>
-      </div>
+      </motion.section>
 
       {/* Fullscreen Plot Modal */}
       <AnimatePresence>
@@ -839,56 +631,33 @@ export default function ArenaView({
           />
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }
 
-function PodiumCard({ icon, badge, title, metric, sub, borderColor }) {
+function PodiumCard({ rank, icon, badge, title, metric, unit, sub, accent }) {
   return (
-    <div
-      style={{
-        backgroundColor: "#0f1523",
-        border: `1px solid ${borderColor}`,
-        borderRadius: "14px",
-        padding: "16px 18px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-      }}
+    <motion.article
+      className="glass z3 pod"
+      style={{ "--pc": accent }}
+      variants={rise}
+      whileHover={{ y: -8, scale: 1.015 }}
+      transition={SPRING_SNAP}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+      <span className="pod-glow" />
+      <span className="pod-num" aria-hidden="true">
+        {rank}
+      </span>
+      <div className="pod-badge">
         {icon}
-        <span
-          style={{
-            fontSize: "10px",
-            fontFamily: "monospace",
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            color: "#94a3b8",
-          }}
-        >
-          {badge}
-        </span>
+        {badge}
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ fontSize: "18px", fontWeight: 800, color: "#f8fafc" }}>{title}</span>
-        <span style={{ fontSize: "14px", fontFamily: "monospace", fontWeight: 700, color: "#10b981" }}>
-          {metric}
-        </span>
+      <h3 className="pod-title">{title}</h3>
+      <div className="pod-metric">
+        {metric}
+        {unit && <small>{unit}</small>}
       </div>
-      <div style={{ fontSize: "11px", color: "#64748b" }}>{sub}</div>
-    </div>
+      <div className="pod-sub">{sub}</div>
+    </motion.article>
   );
 }
-
-const miniBtnStyle = {
-  backgroundColor: "#141c2e",
-  border: "1px solid #26324d",
-  color: "#cbd5e1",
-  borderRadius: "6px",
-  padding: "6px 8px",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
